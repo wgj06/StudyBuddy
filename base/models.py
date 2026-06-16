@@ -47,3 +47,25 @@ class Message(models.Model):
 
     def __str__(self):
         return self.body[0:50]
+
+
+class StudyMatch(models.Model):
+    """用户之间的配对申请"""
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('accepted', 'Accepted'),
+        ('rejected', 'Rejected'),
+    ]
+    
+    initiator = models.ForeignKey(User, on_delete=models.CASCADE, related_name='match_requests_sent')
+    receiver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='match_requests_received')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('initiator', 'receiver')  # 防止重复申请
+        ordering = ['-created']
+
+    def __str__(self):
+        return f"{self.initiator.username} -> {self.receiver.username} ({self.status})"

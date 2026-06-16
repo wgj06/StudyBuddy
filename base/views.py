@@ -4,7 +4,7 @@ from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
-from .models import Room, Topic, Message, User
+from .models import Room, Topic, Message, User, StudyMatch
 from .forms import RoomForm, UserForm, MyUserCreationForm
 
 # Create your views here.
@@ -179,3 +179,74 @@ def topicsPage(request):
 def activityPage(request):
     room_messages = Message.objects.all()
     return render(request, 'base/activity.html', {'room_messages': room_messages})
+
+
+@login_required(login_url='login')
+def matchPage(request):
+    """显示推荐的学习伙伴列表（修复：双向排除已配对用户）"""
+    
+    # 获取我发出去的申请
+    sent_to = StudyMatch.objects.filter(
+        initiator_id=request.user
+    ).values_list('receiver_id', flat=True)
+    
+    # 获取对方发给我的申请
+    received_from = StudyMatch.objects.filter(
+        receiver_id=request.user
+    ).values_list('initiator_id', flat=True)
+    
+    # 合并排除列表（双向排除 ✅）
+    excluded_ids = list(sent_to) + list(received_from) + [request.user.id]
+    
+    # 获取推荐用户：排除自己和已有申请的用户
+    recommended_users = User.objects.exclude(id__in=excluded_ids)
+    
+    context = {'recommended_users': recommended_users}
+    return render(request, 'base/match.html', context)
+
+
+@login_required(login_url='login')
+def sendMatchRequest(request):
+    """发送配对申请（双向检查，防止重复申请）"""
+    
+    if request.method == 'POST':
+        receiver_id = request.POST.get('receiver_id')
+        
+        try:
+            receiver = User.objects.get(id=receiver_id)
+        except User.DoesNotExist:
+            messages.error(request, 'User not found')
+            return redirect('match')
+        
+        # 防止自己申请自己
+        if receiver == request.user:
+            messages.error(request, 'You cannot send a match request to yourself')
+            return redirect('match')
+        
+        # 检查是否已存在申请（双向检查 ✅）
+        # 情况1：我已经给对方发过申请
+        existing_sent = StudyMatch.objects.filter(
+            initiator=request.user,
+            receiver=receiver
+        ).exists()
+        
+        # 情况2：对方已经给我发过申请
+        existing_received = StudyMatch.objects.filter(
+            initiator=receiver,
+            receiver=request.user
+        ).exists()
+        
+        if existing_sent or existing_received:
+            messages.error(request, 'Match request already exists')
+            return redirect('match')
+        
+        # 创建申请
+        StudyMatch.objects.create(
+            initiator=request.user,
+            receiver=receiver
+        )
+        
+        messages.success(request, f'Match request sent to {receiver.username}')
+        return redirect('match')
+    
+    return redirect('match')
